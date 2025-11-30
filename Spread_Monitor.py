@@ -39,6 +39,8 @@ except Exception as e:
 
 # 사이드바 설정
 st.sidebar.title("설정")
+st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📅 조회 기간 설정")
 
@@ -96,19 +98,23 @@ st.sidebar.markdown("""
 
 1. **EFFR - IORB**
    - 시장금리 - Fed 지급금리
-   - 보통 음수 (EFFR < IORB)
+   - 양수: 유동성 타이트
 
 2. **SOFR - RRP**
    - 담보부 레포 - 역레포
-   - 보통 양수 (SOFR > RRP)
+   - >10bp: 레포시장 긴장
 
 3. **3M TB - EFFR**
    - 3개월 국채 - 연방기금
-   - 텀 프리미엄 반영
+   - <-20bp: 완화 기대
 
 4. **10Y - 2Y**
-   - 장기물 - 단기물
-   - 수익률 곡선 기울기
+   - 장기물 - 중기물
+   - 음수: 침체 신호
+
+5. **10Y - 3M** ⭐
+   - 장기물 - 초단기물
+   - 최강 침체 선행지표
 """)
 
 # 스프레드 정의
@@ -118,10 +124,15 @@ SPREADS = {
         "series": ["EFFR", "IORB"],
         "multiplier": 1000,
         "threshold_min": -10,
-        "threshold_max": -5,
-        "description": "준비금 충분성 지표 (좁아질수록 준비금 부족 신호)",
-        "normal_range": "-10 ~ -5bp",
-        "interpretation": "정상: 충분한 준비금 / 주의(-5bp 초과): 준비금 감소, QT 종료 임박"
+        "threshold_max": 10,
+        "description": "초단기 자금시장 유동성 지표",
+        "normal_range": "-10 ~ +10bp",
+        "interpretation": "양수: 준비금 부족/유동성 타이트 / 음수: 초과 준비금/유동성 풍부",
+        "signals": {
+            "tight": (10, float('inf'), "⚠️ 초단기 유동성 타이트 - 준비금 부족"),
+            "normal": (-10, 10, "✅ 정상 범위 (정책 운용 변동 포함)"),
+            "loose": (float('-inf'), -10, "💧 초과 준비금 (유동성 풍부)")
+        }
     },
     "SOFR-RRP": {
         "name": "SOFR - RRP",
@@ -129,32 +140,63 @@ SPREADS = {
         "multiplier": 1000,
         "threshold_min": 0,
         "threshold_max": 10,
-        "description": "레포 시장 유동성 압박 지표",
-        "normal_range": "0 ~ 10bp",
-        "interpretation": "정상: 안정적 레포 시장 / 주의(10bp 초과): 유동성 긴축, 분기말 압박"
+        "description": "레포 시장 긴장도 지표",
+        "normal_range": "0 ~ +10bp",
+        "interpretation": "양수: 정상 / >10bp: 담보 부족/레포시장 긴장 / 음수: 비정상",
+        "signals": {
+            "stress": (10, float('inf'), "⚠️ 레포시장 스트레스 - 담보 부족"),
+            "normal": (0, 10, "✅ 보통 변동"),
+            "abnormal": (float('-inf'), 0, "🔍 비정상 - 데이터/정책 확인 필요")
+        }
     },
     "DGS3MO-EFFR": {
         "name": "3M Treasury - EFFR",
         "series": ["DGS3MO", "EFFR"],
         "multiplier": 100,
-        "threshold_min": -5,
-        "threshold_max": 15,
-        "description": "단기 금리 기대 및 정책 프리미엄",
-        "normal_range": "-5 ~ 15bp",
-        "interpretation": "음수: 금리인하 기대 강함 / 양수: 정상 텀 프리미엄"
+        "threshold_min": -20,
+        "threshold_max": 20,
+        "description": "단기 금리 기대 및 정책 방향 신호",
+        "normal_range": "-20 ~ +20bp",
+        "interpretation": "<-20bp: 금리 인하 예상 / 중립: 균형 / >20bp: 금리 인상 기대",
+        "signals": {
+            "easing": (float('-inf'), -20, "🔽 금리 인하 예상 (완화 기대)"),
+            "neutral": (-20, 20, "✅ 중립 (명확한 기대 신호 없음)"),
+            "tightening": (20, float('inf'), "🔼 금리 인상 기대 (긴축 신호)")
+        }
     },
     "DGS10-DGS2": {
         "name": "10Y - 2Y Yield Curve",
         "series": ["DGS10", "DGS2"],
         "multiplier": 100,
         "threshold_min": 0,
+        "threshold_max": 50,
+        "description": "경기 사이클 및 경기침체 예측 지표 (2s10s)",
+        "normal_range": "0 ~ +50bp",
+        "interpretation": "음수(역전): 경기침체 신호 / 0~50bp: 정상 / >50bp: 가파른 성장 기대",
+        "signals": {
+            "severe_inversion": (float('-inf'), -50, "🚨 강한 침체 리스크 (심층 분석 권장)"),
+            "mild_inversion": (-50, 0, "⚠️ 곡선 역전 - 경기침체 경고"),
+            "normal": (0, 50, "✅ 정상 (완만한 우상향)"),
+            "steep": (50, float('inf'), "📈 가파른 곡선 (강한 성장/인플레 기대)")
+        }
+    },
+    "DGS10-DGS3MO": {
+        "name": "10Y - 3M Yield Curve",
+        "series": ["DGS10", "DGS3MO"],
+        "multiplier": 100,
+        "threshold_min": 0,
         "threshold_max": 100,
-        "description": "경기 사이클 및 경기침체 예측 지표",
-        "normal_range": "0 ~ 100bp",
-        "interpretation": "음수(역전): 12-18개월 내 경기침체 가능성 / 양수: 정상 성장 기대"
+        "description": "가장 강력한 경기침체 선행 지표",
+        "normal_range": "0 ~ +100bp",
+        "interpretation": "<-50bp: 매우 강한 침체 신호 / 0~100bp: 정상 / >100bp: 장단기 프리미엄",
+        "signals": {
+            "strong_recession": (float('-inf'), -50, "🚨 매우 강한 침체 선행 신호"),
+            "recession_warning": (-50, 0, "⚠️ 침체 우려 레벨"),
+            "normal": (0, 100, "✅ 정상-완만"),
+            "steep": (100, float('inf'), "📈 장단기 프리미엄 (성장/인플레 기대)")
+        }
     }
 }
-st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 
 def fetch_fred_data(series_id, api_key, start_date=None, end_date=None):
     """FRED API로부터 데이터 가져오기"""
@@ -213,6 +255,13 @@ def calculate_spread(spread_info, api_key, start_date, end_date=None):
     
     return df, latest_value, df[[series1_id, series2_id]]
 
+def get_signal_status(value, signals):
+    """신호 기반 상태 판단"""
+    for signal_name, (min_val, max_val, message) in signals.items():
+        if min_val <= value < max_val:
+            return message
+    return "📊 데이터 확인 필요"
+
 def create_spread_chart(df, spread_name, spread_info, latest_value):
     """스프레드 차트 생성"""
     fig = go.Figure()
@@ -226,16 +275,65 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
         line=dict(color='#2E86DE', width=2)
     ))
     
-    # 정상 범위 표시
-    fig.add_hrect(
-        y0=spread_info['threshold_min'],
-        y1=spread_info['threshold_max'],
-        fillcolor="green",
-        opacity=0.1,
-        line_width=0,
-        annotation_text="정상 범위",
-        annotation_position="top left"
-    )
+    # 신호 레벨 표시 (signals가 있는 경우)
+    if 'signals' in spread_info:
+        colors_map = {
+            'normal': 'green',
+            'neutral': 'green',
+            'mild_inversion': 'orange',
+            'recession_warning': 'orange',
+            'easing': 'lightblue',
+            'tightening': 'pink',
+            'stress': 'red',
+            'severe_inversion': 'red',
+            'strong_recession': 'red',
+            'tight': 'orange',
+            'abnormal': 'gray',
+            'loose': 'lightgreen',
+            'steep': 'lightblue'
+        }
+        
+        for signal_name, (min_val, max_val, message) in spread_info['signals'].items():
+            if min_val != float('-inf') and max_val != float('inf'):
+                color = colors_map.get(signal_name, 'gray')
+                fig.add_hrect(
+                    y0=min_val,
+                    y1=max_val,
+                    fillcolor=color,
+                    opacity=0.1,
+                    line_width=0,
+                    annotation_text=message.split(' - ')[0] if ' - ' in message else message,
+                    annotation_position="left"
+                )
+            elif min_val == float('-inf') and max_val != float('inf'):
+                # 하한 없음
+                fig.add_hline(
+                    y=max_val,
+                    line_dash="dash",
+                    line_color=colors_map.get(signal_name, 'gray'),
+                    opacity=0.5,
+                    annotation_text=f"{message.split(' - ')[0]}: < {max_val}bp"
+                )
+            elif min_val != float('-inf') and max_val == float('inf'):
+                # 상한 없음
+                fig.add_hline(
+                    y=min_val,
+                    line_dash="dash",
+                    line_color=colors_map.get(signal_name, 'gray'),
+                    opacity=0.5,
+                    annotation_text=f"{message.split(' - ')[0]}: > {min_val}bp"
+                )
+    else:
+        # 기존 방식 (정상 범위만 표시)
+        fig.add_hrect(
+            y0=spread_info['threshold_min'],
+            y1=spread_info['threshold_max'],
+            fillcolor="green",
+            opacity=0.1,
+            line_width=0,
+            annotation_text="정상 범위",
+            annotation_position="top left"
+        )
     
     # 레이아웃
     fig.update_layout(
@@ -288,7 +386,7 @@ if api_key:
     # 현재 상태 요약
     st.subheader("📍 현재 상태 (2025-11)")
     
-    summary_cols = st.columns(4)
+    summary_cols = st.columns(5)
     
     for idx, (key, spread_info) in enumerate(SPREADS.items()):
         with summary_cols[idx]:
@@ -299,15 +397,19 @@ if api_key:
                 )
                 
                 if latest_value is not None:
-                    # 상태 판단
-                    in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
-                    status = "✅ 정상" if in_range else "⚠️ 주의"
-                    delta_color = "normal" if in_range else "inverse"
+                    # 신호 기반 상태 판단
+                    if 'signals' in spread_info:
+                        status_msg = get_signal_status(latest_value, spread_info['signals'])
+                        # 기본 정상 범위 체크
+                        in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
+                    else:
+                        in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
+                        status_msg = "✅ 정상" if in_range else "⚠️ 주의"
                     
                     st.metric(
                         label=spread_info['name'],
                         value=f"{latest_value:.1f}bp",
-                        delta=status
+                        delta=status_msg.split(' - ')[0] if ' - ' in status_msg else status_msg
                     )
                     st.caption(spread_info['description'])
     
@@ -456,13 +558,22 @@ if api_key:
                             st.metric("최소", f"{df_spread['spread'].min():.2f}bp")
                     
                     with col2:
-                        st.info(f"""
-                        **정상 범위:** {spread_info['normal_range']}
+                        # 현재 신호 상태
+                        if 'signals' in spread_info:
+                            current_signal = get_signal_status(latest_value, spread_info['signals'])
+                            signal_lines = ["**현재 신호:**", current_signal, ""]
+                        else:
+                            signal_lines = []
                         
-                        **의미:** {spread_info['description']}
+                        info_text = "\n".join(signal_lines + [
+                            f"**정상 범위:** {spread_info['normal_range']}",
+                            "",
+                            f"**의미:** {spread_info['description']}",
+                            "",
+                            f"**해석:** {spread_info['interpretation']}"
+                        ])
                         
-                        **해석:** {spread_info['interpretation']}
-                        """)
+                        st.info(info_text)
                     
                     # 스프레드 차트
                     st.plotly_chart(
