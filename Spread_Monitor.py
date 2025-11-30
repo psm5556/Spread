@@ -73,9 +73,9 @@ SPREADS = {
         "normal_range": "-5 ~ 15bp",
         "interpretation": "음수: 금리인하 기대 강함 / 양수: 정상 텀 프리미엄"
     },
-    "DGS2-DGS10": {
-        "name": "2Y - 10Y Yield Curve",
-        "series": ["DGS2", "DGS10"],
+    "DGS10-DGS2": {
+        "name": "10Y - 2Y Yield Curve",
+        "series": ["DGS10", "DGS2"],
         "multiplier": 100,
         "threshold_min": 0,
         "threshold_max": 100,
