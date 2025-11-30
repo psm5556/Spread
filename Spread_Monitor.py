@@ -41,6 +41,28 @@ except Exception as e:
 st.sidebar.title("설정")
 st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 스프레드 계산 방식")
+st.sidebar.markdown("""
+**각 스프레드는 다음과 같이 계산됩니다:**
+
+1. **EFFR - IORB**
+   - 시장금리 - Fed 지급금리
+   - 보통 음수 (EFFR < IORB)
+
+2. **SOFR - RRP**
+   - 담보부 레포 - 역레포
+   - 보통 양수 (SOFR > RRP)
+
+3. **3M TB - EFFR**
+   - 3개월 국채 - 연방기금
+   - 텀 프리미엄 반영
+
+4. **10Y - 2Y**
+   - 장기물 - 단기물
+   - 수익률 곡선 기울기
+""")
+
 # 스프레드 정의
 SPREADS = {
     "EFFR-IORB": {
@@ -248,6 +270,120 @@ if api_key:
                         delta=status
                     )
                     st.caption(spread_info['description'])
+    
+    # 연준 정책금리 및 주요 금리 차트
+    st.subheader("🎯 연준 정책금리 프레임워크")
+    
+    with st.spinner('데이터 로딩 중...'):
+        # 정책금리 관련 데이터 가져오기
+        policy_series = {
+            'SOFR': '담보부 익일물 금리',
+            'RRPONTSYAWARD': 'ON RRP (하한)',
+            'IORB': '준비금 이자율',
+            'EFFR': '연방기금 실효금리',
+            'DFEDTARL': 'FF 목표 하한',
+            'DFEDTARU': 'FF 목표 상한'
+        }
+        
+        policy_data = {}
+        for series_id in policy_series.keys():
+            df = fetch_fred_data(series_id, api_key, start_date)
+            if df is not None:
+                policy_data[series_id] = df
+        
+        if len(policy_data) > 0:
+            # 모든 데이터 병합
+            combined_df = pd.DataFrame()
+            for series_id, df in policy_data.items():
+                combined_df[series_id] = df['value']
+            
+            combined_df = combined_df.fillna(method='ffill').dropna()
+            
+            # 차트 생성
+            fig = go.Figure()
+            
+            # 목표 범위 (음영)
+            if 'DFEDTARL' in combined_df.columns and 'DFEDTARU' in combined_df.columns:
+                fig.add_trace(go.Scatter(
+                    x=combined_df.index,
+                    y=combined_df['DFEDTARU'],
+                    mode='lines',
+                    name='FF 목표 상한',
+                    line=dict(color='rgba(200,200,200,0.3)', width=1, dash='dash'),
+                    showlegend=True
+                ))
+                fig.add_trace(go.Scatter(
+                    x=combined_df.index,
+                    y=combined_df['DFEDTARL'],
+                    mode='lines',
+                    name='FF 목표 하한',
+                    line=dict(color='rgba(200,200,200,0.3)', width=1, dash='dash'),
+                    fill='tonexty',
+                    fillcolor='rgba(200,200,200,0.1)',
+                    showlegend=True
+                ))
+            
+            # 주요 금리들
+            colors = {
+                'SOFR': '#FF6B6B',
+                'RRPONTSYAWARD': '#4ECDC4',
+                'IORB': '#95E1D3',
+                'EFFR': '#F38181'
+            }
+            
+            for series_id, label in policy_series.items():
+                if series_id in combined_df.columns and series_id not in ['DFEDTARL', 'DFEDTARU']:
+                    fig.add_trace(go.Scatter(
+                        x=combined_df.index,
+                        y=combined_df[series_id],
+                        mode='lines',
+                        name=f'{series_id} ({label})',
+                        line=dict(color=colors.get(series_id, '#999999'), width=2)
+                    ))
+            
+            fig.update_layout(
+                title="연준 정책금리 프레임워크 및 시장 금리",
+                xaxis_title="날짜",
+                yaxis_title="금리 (%)",
+                hovermode='x unified',
+                height=500,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 설명
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info("""
+                **연준의 금리 조절 메커니즘:**
+                - **목표 범위**: FOMC가 설정한 정책금리 범위 (회색 음영)
+                - **IORB**: 은행 준비금에 대한 이자 (상한 역할)
+                - **ON RRP**: 역레포 금리 (하한 역할)
+                - **EFFR**: 실제 시장에서 거래되는 금리
+                - **SOFR**: 국채 담보부 레포 금리
+                """)
+            
+            with col2:
+                if combined_df is not None and len(combined_df) > 0:
+                    latest = combined_df.iloc[-1]
+                    st.success(f"""
+                    **최신 금리 (%):**
+                    - SOFR: {latest.get('SOFR', 0):.2f}%
+                    - EFFR: {latest.get('EFFR', 0):.2f}%
+                    - IORB: {latest.get('IORB', 0):.2f}%
+                    - ON RRP: {latest.get('RRPONTSYAWARD', 0):.2f}%
+                    - 목표범위: {latest.get('DFEDTARL', 0):.2f}% - {latest.get('DFEDTARU', 0):.2f}%
+                    """)
+    
+    st.markdown("---")
     
     # 상세 차트
     st.subheader("📈 상세 차트")
