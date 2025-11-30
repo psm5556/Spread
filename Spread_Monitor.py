@@ -42,6 +42,56 @@ st.sidebar.title("설정")
 st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 📅 조회 기간 설정")
+
+# 기간 선택 방식
+date_mode = st.sidebar.radio(
+    "기간 선택 방식",
+    ["빠른 선택", "직접 입력"],
+    index=0
+)
+
+if date_mode == "빠른 선택":
+    period = st.sidebar.selectbox(
+        "조회 기간",
+        ["1개월", "3개월", "6개월", "1년", "2년", "5년", "10년", "전체"],
+        index=3
+    )
+    
+    period_map = {
+        "1개월": 30,
+        "3개월": 90,
+        "6개월": 180,
+        "1년": 365,
+        "2년": 730,
+        "5년": 1825,
+        "10년": 3650,
+        "전체": 365 * 20
+    }
+    
+    start_date = (datetime.now() - timedelta(days=period_map[period])).strftime('%Y-%m-%d')
+    
+else:  # 직접 입력
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        start_date_input = st.date_input(
+            "시작 날짜",
+            value=datetime.now() - timedelta(days=365),
+            max_value=datetime.now()
+        )
+    
+    with col2:
+        end_date_input = st.date_input(
+            "종료 날짜",
+            value=datetime.now(),
+            max_value=datetime.now()
+        )
+    
+    start_date = start_date_input.strftime('%Y-%m-%d')
+    # end_date는 API 파라미터로 추가 필요시 사용
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 📊 스프레드 계산 방식")
 st.sidebar.markdown("""
 **각 스프레드는 다음과 같이 계산됩니다:**
@@ -107,17 +157,21 @@ SPREADS = {
     }
 }
 
-def fetch_fred_data(series_id, api_key, start_date=None):
+def fetch_fred_data(series_id, api_key, start_date=None, end_date=None):
     """FRED API로부터 데이터 가져오기"""
     if not start_date:
         start_date = (datetime.now() - timedelta(days=365*2)).strftime('%Y-%m-%d')
+    
+    if not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
     
     url = f"https://api.stlouisfed.org/fred/series/observations"
     params = {
         'series_id': series_id,
         'api_key': api_key,
         'file_type': 'json',
-        'observation_start': start_date
+        'observation_start': start_date,
+        'observation_end': end_date
     }
     
     try:
@@ -136,13 +190,13 @@ def fetch_fred_data(series_id, api_key, start_date=None):
         st.error(f"데이터 로딩 실패 ({series_id}): {str(e)}")
         return None
 
-def calculate_spread(spread_info, api_key, start_date):
+def calculate_spread(spread_info, api_key, start_date, end_date=None):
     """스프레드 계산"""
     series1_id, series2_id = spread_info['series']
     
     # 데이터 가져오기
-    df1 = fetch_fred_data(series1_id, api_key, start_date)
-    df2 = fetch_fred_data(series2_id, api_key, start_date)
+    df1 = fetch_fred_data(series1_id, api_key, start_date, end_date)
+    df2 = fetch_fred_data(series2_id, api_key, start_date, end_date)
     
     if df1 is None or df2 is None:
         return None, None, None
@@ -226,25 +280,11 @@ st.title("📊 금리 스프레드 모니터링 대시보드")
 st.markdown("**미국 금리 시장 스프레드 실시간 모니터링**")
 
 if api_key:
-    # 기간 선택
-    col1, col2 = st.columns(2)
-    with col1:
-        period = st.selectbox(
-            "조회 기간",
-            ["1개월", "3개월", "6개월", "1년", "2년", "전체"],
-            index=3
-        )
-    
-    period_map = {
-        "1개월": 30,
-        "3개월": 90,
-        "6개월": 180,
-        "1년": 365,
-        "2년": 730,
-        "전체": 365 * 10
-    }
-    
-    start_date = (datetime.now() - timedelta(days=period_map[period])).strftime('%Y-%m-%d')
+    # 선택된 기간 표시
+    if date_mode == "빠른 선택":
+        st.info(f"📅 **조회 기간**: {period} ({start_date} ~ {datetime.now().strftime('%Y-%m-%d')})")
+    else:
+        st.info(f"📅 **조회 기간**: {start_date} ~ {end_date_input.strftime('%Y-%m-%d')}")
     
     # 현재 상태 요약
     st.subheader("📍 현재 상태 (2025-11)")
@@ -254,8 +294,9 @@ if api_key:
     for idx, (key, spread_info) in enumerate(SPREADS.items()):
         with summary_cols[idx]:
             with st.spinner(f'{spread_info["name"]} 로딩 중...'):
+                end_date_param = end_date_input.strftime('%Y-%m-%d') if date_mode == "직접 입력" else None
                 df_spread, latest_value, df_components = calculate_spread(
-                    spread_info, api_key, start_date
+                    spread_info, api_key, start_date, end_date_param
                 )
                 
                 if latest_value is not None:
@@ -285,9 +326,11 @@ if api_key:
             'DFEDTARU': 'FF 목표 상한'
         }
         
+        end_date_param = end_date_input.strftime('%Y-%m-%d') if date_mode == "직접 입력" else None
+        
         policy_data = {}
         for series_id in policy_series.keys():
-            df = fetch_fred_data(series_id, api_key, start_date)
+            df = fetch_fred_data(series_id, api_key, start_date, end_date_param)
             if df is not None:
                 policy_data[series_id] = df
         
@@ -393,8 +436,9 @@ if api_key:
     for idx, (key, spread_info) in enumerate(SPREADS.items()):
         with tabs[idx]:
             with st.spinner('데이터 로딩 중...'):
+                end_date_param = end_date_input.strftime('%Y-%m-%d') if date_mode == "직접 입력" else None
                 df_spread, latest_value, df_components = calculate_spread(
-                    spread_info, api_key, start_date
+                    spread_info, api_key, start_date, end_date_param
                 )
                 
                 if df_spread is not None:
