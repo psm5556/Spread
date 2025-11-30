@@ -12,9 +12,34 @@ st.set_page_config(
     layout="wide"
 )
 
-# FRED API 키 입력 (사이드바)
+# FRED API 키 가져오기 (Streamlit Secrets 사용)
+try:
+    api_key = st.secrets["FRED_API_KEY"]
+except Exception as e:
+    st.error("⚠️ FRED API 키가 설정되지 않았습니다.")
+    st.info("""
+    **Streamlit Cloud Secrets 설정 방법:**
+    
+    1. Streamlit Cloud 대시보드에서 앱 선택
+    2. Settings → Secrets 메뉴 클릭
+    3. 다음 형식으로 입력:
+    ```
+    FRED_API_KEY = "your_api_key_here"
+    ```
+    4. Save 클릭
+    
+    **로컬 실행 시:**
+    
+    `.streamlit/secrets.toml` 파일 생성 후 동일한 형식으로 입력
+    
+    **FRED API 키 발급:**
+    https://fred.stlouisfed.org/ 에서 무료 계정 생성 후 발급
+    """)
+    api_key = None
+
+# 사이드바 설정
 st.sidebar.title("설정")
-api_key = st.sidebar.text_input("FRED API Key", type="password", help="https://fred.stlouisfed.org/docs/api/api_key.html 에서 무료로 발급받을 수 있습니다")
+st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 
 # 스프레드 정의
 SPREADS = {
@@ -180,16 +205,7 @@ def create_components_chart(df_components, series_ids):
 st.title("📊 금리 스프레드 모니터링 대시보드")
 st.markdown("**미국 금리 시장 스프레드 실시간 모니터링**")
 
-if not api_key:
-    st.warning("⚠️ FRED API 키를 왼쪽 사이드바에 입력해주세요")
-    st.info("""
-    FRED API 키 발급 방법:
-    1. https://fred.stlouisfed.org/ 접속
-    2. 무료 계정 생성
-    3. API Keys 메뉴에서 키 발급
-    4. 발급받은 키를 왼쪽 사이드바에 입력
-    """)
-else:
+if api_key:
     # 기간 선택
     col1, col2 = st.columns(2)
     with col1:
