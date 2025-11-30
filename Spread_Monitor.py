@@ -39,7 +39,6 @@ except Exception as e:
 
 # 사이드바 설정
 st.sidebar.title("설정")
-st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📅 조회 기간 설정")
 
@@ -155,6 +154,7 @@ SPREADS = {
         "interpretation": "음수(역전): 12-18개월 내 경기침체 가능성 / 양수: 정상 성장 기대"
     }
 }
+st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
 
 def fetch_fred_data(series_id, api_key, start_date=None, end_date=None):
     """FRED API로부터 데이터 가져오기"""
