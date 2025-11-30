@@ -40,7 +40,6 @@ except Exception as e:
 # 사이드바 설정
 st.sidebar.title("설정")
 st.sidebar.success("✅ API 키 연결됨" if api_key else "❌ API 키 없음")
-
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📅 조회 기간 설정")
 
