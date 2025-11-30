@@ -47,35 +47,41 @@ SPREADS = {
         "name": "EFFR - IORB",
         "series": ["EFFR", "IORB"],
         "multiplier": 1000,
-        "threshold": -5,
-        "description": "은행 준비금 부족, FED 대차대조표 축소 신호",
-        "normal_range": "~-5bp"
+        "threshold_min": -10,
+        "threshold_max": -5,
+        "description": "준비금 충분성 지표 (좁아질수록 준비금 부족 신호)",
+        "normal_range": "-10 ~ -5bp",
+        "interpretation": "정상: 충분한 준비금 / 주의(-5bp 초과): 준비금 감소, QT 종료 임박"
     },
     "SOFR-RRP": {
         "name": "SOFR - RRP",
         "series": ["SOFR", "RRPONTSYAWARD"],
         "multiplier": 1000,
-        "threshold": -10,
-        "description": "MMF 역레포 이탈, 레포 시장 선호 전환",
-        "normal_range": "~-10bp"
+        "threshold_min": 0,
+        "threshold_max": 10,
+        "description": "레포 시장 유동성 압박 지표",
+        "normal_range": "0 ~ 10bp",
+        "interpretation": "정상: 안정적 레포 시장 / 주의(10bp 초과): 유동성 긴축, 분기말 압박"
     },
     "DGS3MO-EFFR": {
         "name": "3M Treasury - EFFR",
         "series": ["DGS3MO", "EFFR"],
         "multiplier": 100,
-        "threshold_min": -10,
-        "threshold_max": 0,
-        "description": "단기국채 프리미엄 축소, 인하 기대",
-        "normal_range": "-10 ~ 0bp"
+        "threshold_min": -5,
+        "threshold_max": 15,
+        "description": "단기 금리 기대 및 정책 프리미엄",
+        "normal_range": "-5 ~ 15bp",
+        "interpretation": "음수: 금리인하 기대 강함 / 양수: 정상 텀 프리미엄"
     },
     "DGS2-DGS10": {
         "name": "2Y - 10Y Yield Curve",
         "series": ["DGS2", "DGS10"],
         "multiplier": 100,
-        "threshold_min": -50,
-        "threshold_max": 0,
-        "description": "금리커브 스티프닝, 경기 연착륙 기대",
-        "normal_range": "-50 ~ 0bp"
+        "threshold_min": 0,
+        "threshold_max": 100,
+        "description": "경기 사이클 및 경기침체 예측 지표",
+        "normal_range": "0 ~ 100bp",
+        "interpretation": "음수(역전): 12-18개월 내 경기침체 가능성 / 양수: 정상 성장 기대"
     }
 }
 
@@ -145,24 +151,16 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
         line=dict(color='#2E86DE', width=2)
     ))
     
-    # 임계값 표시
-    if 'threshold' in spread_info:
-        fig.add_hline(
-            y=spread_info['threshold'],
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"경계선: {spread_info['threshold']}bp"
-        )
-    elif 'threshold_min' in spread_info and 'threshold_max' in spread_info:
-        fig.add_hrect(
-            y0=spread_info['threshold_min'],
-            y1=spread_info['threshold_max'],
-            fillcolor="green",
-            opacity=0.1,
-            line_width=0,
-            annotation_text="정상 범위",
-            annotation_position="top left"
-        )
+    # 정상 범위 표시
+    fig.add_hrect(
+        y0=spread_info['threshold_min'],
+        y1=spread_info['threshold_max'],
+        fillcolor="green",
+        opacity=0.1,
+        line_width=0,
+        annotation_text="정상 범위",
+        annotation_position="top left"
+    )
     
     # 레이아웃
     fig.update_layout(
@@ -240,13 +238,9 @@ if api_key:
                 
                 if latest_value is not None:
                     # 상태 판단
-                    if 'threshold' in spread_info:
-                        status = "⚠️ 주의" if latest_value < spread_info['threshold'] else "✅ 정상"
-                        delta_color = "inverse" if latest_value < spread_info['threshold'] else "normal"
-                    else:
-                        in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
-                        status = "✅ 정상" if in_range else "⚠️ 주의"
-                        delta_color = "normal" if in_range else "inverse"
+                    in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
+                    status = "✅ 정상" if in_range else "⚠️ 주의"
+                    delta_color = "normal" if in_range else "inverse"
                     
                     st.metric(
                         label=spread_info['name'],
@@ -287,6 +281,8 @@ if api_key:
                         **정상 범위:** {spread_info['normal_range']}
                         
                         **의미:** {spread_info['description']}
+                        
+                        **해석:** {spread_info['interpretation']}
                         """)
                     
                     # 스프레드 차트
