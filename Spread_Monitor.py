@@ -265,12 +265,16 @@ def calculate_spread(spread_info, api_key, start_date, end_date=None):
         # spread 컬럼을 원본 값으로 설정
         df['spread'] = df['value'] * spread_info['multiplier']
         
-        # 4주 이동평균 추가
-        df['ma_4w'] = df['spread'].rolling(window=20, min_periods=1).mean()
+        # 4주 이동평균 추가 (주단위 데이터이므로 4개 데이터포인트 사용)
+        df['ma_4w'] = df['spread'].rolling(window=4, min_periods=1).mean()
         
         latest_value = df['spread'].iloc[-1] if len(df) > 0 else None
         
-        return df, latest_value, df[[series_id]]
+        # df_components는 원본 value 컬럼을 series_id로 rename하여 반환
+        df_components = df[['value']].copy()
+        df_components.columns = [series_id]
+        
+        return df, latest_value, df_components
     
     # 기존 스프레드 계산 로직
     series1_id, series2_id = spread_info['series']
@@ -285,7 +289,7 @@ def calculate_spread(spread_info, api_key, start_date, end_date=None):
     # 데이터 병합
     df = df1.join(df2, how='outer', rsuffix='_2')
     df.columns = [series1_id, series2_id]
-    df = df.fillna(method='ffill').dropna()
+    df = df.ffill().dropna()
     
     # 스프레드 계산
     df['spread'] = (df[series1_id] - df[series2_id]) * spread_info['multiplier']
@@ -519,7 +523,7 @@ if api_key:
             for series_id, df in policy_data.items():
                 combined_df[series_id] = df['value']
             
-            combined_df = combined_df.fillna(method='ffill').dropna()
+            combined_df = combined_df.ffill().dropna()
             
             # 차트 생성
             fig = go.Figure()
