@@ -115,6 +115,10 @@ st.sidebar.markdown("""
 5. **10Y - 3M** ⭐
    - 장기물 - 초단기물
    - 최강 침체 선행지표
+
+6. **STLFSI4** 📉
+   - 금융 스트레스 인덱스
+   - >0.5: 높은 스트레스
 """)
 
 # 스프레드 정의
@@ -195,6 +199,23 @@ SPREADS = {
             "normal": (0, 100, "✅ 정상-완만"),
             "steep": (100, float('inf'), "📈 장단기 프리미엄 (성장/인플레 기대)")
         }
+    },
+    "STLFSI4": {
+        "name": "금융 스트레스 인덱스",
+        "series": ["STLFSI4"],
+        "multiplier": 1,
+        "threshold_min": -0.5,
+        "threshold_max": 0.5,
+        "description": "세인트루이스 연준 금융 스트레스 지표",
+        "normal_range": "-0.5 ~ +0.5",
+        "interpretation": "0 기준: 평균 스트레스 / 양수: 스트레스 증가 / 음수: 스트레스 감소",
+        "signals": {
+            "severe_stress": (1.5, float('inf'), "🚨 심각한 금융 스트레스"),
+            "elevated_stress": (0.5, 1.5, "⚠️ 높은 스트레스"),
+            "normal": (-0.5, 0.5, "✅ 정상 범위"),
+            "low_stress": (float('-inf'), -0.5, "💚 낮은 스트레스")
+        },
+        "is_single_series": True
     }
 }
 
@@ -233,6 +254,25 @@ def fetch_fred_data(series_id, api_key, start_date=None, end_date=None):
 
 def calculate_spread(spread_info, api_key, start_date, end_date=None):
     """스프레드 계산"""
+    # 단일 시리즈인 경우 (STLFSI4)
+    if spread_info.get('is_single_series', False):
+        series_id = spread_info['series'][0]
+        df = fetch_fred_data(series_id, api_key, start_date, end_date)
+        
+        if df is None:
+            return None, None, None
+        
+        # spread 컬럼을 원본 값으로 설정
+        df['spread'] = df['value'] * spread_info['multiplier']
+        
+        # 4주 이동평균 추가
+        df['ma_4w'] = df['spread'].rolling(window=20, min_periods=1).mean()
+        
+        latest_value = df['spread'].iloc[-1] if len(df) > 0 else None
+        
+        return df, latest_value, df[[series_id]]
+    
+    # 기존 스프레드 계산 로직
     series1_id, series2_id = spread_info['series']
     
     # 데이터 가져오기
@@ -266,14 +306,44 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
     """스프레드 차트 생성"""
     fig = go.Figure()
     
-    # 스프레드 라인
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df['spread'],
-        mode='lines',
-        name='Spread',
-        line=dict(color='#2E86DE', width=2)
-    ))
+    # 단일 시리즈인 경우 (STLFSI4)
+    if spread_info.get('is_single_series', False):
+        # 원본 데이터
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['spread'],
+            mode='lines',
+            name='STLFSI4',
+            line=dict(color='#2E86DE', width=2)
+        ))
+        
+        # 4주 이동평균
+        if 'ma_4w' in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['ma_4w'],
+                mode='lines',
+                name='4주 이동평균',
+                line=dict(color='#FF6B6B', width=2, dash='dash')
+            ))
+        
+        # 0 기준선
+        fig.add_hline(
+            y=0,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5,
+            annotation_text="평균 수준"
+        )
+    else:
+        # 기존 스프레드 라인
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['spread'],
+            mode='lines',
+            name='Spread',
+            line=dict(color='#2E86DE', width=2)
+        ))
     
     # 신호 레벨 표시 (signals가 있는 경우)
     if 'signals' in spread_info:
@@ -290,7 +360,10 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
             'tight': 'orange',
             'abnormal': 'gray',
             'loose': 'lightgreen',
-            'steep': 'lightblue'
+            'steep': 'lightblue',
+            'severe_stress': 'red',
+            'elevated_stress': 'orange',
+            'low_stress': 'lightgreen'
         }
         
         for signal_name, (min_val, max_val, message) in spread_info['signals'].items():
@@ -312,7 +385,7 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
                     line_dash="dash",
                     line_color=colors_map.get(signal_name, 'gray'),
                     opacity=0.5,
-                    annotation_text=f"{message.split(' - ')[0]}: < {max_val}bp"
+                    annotation_text=f"{message.split(' - ')[0]}: < {max_val}"
                 )
             elif min_val != float('-inf') and max_val == float('inf'):
                 # 상한 없음
@@ -321,7 +394,7 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
                     line_dash="dash",
                     line_color=colors_map.get(signal_name, 'gray'),
                     opacity=0.5,
-                    annotation_text=f"{message.split(' - ')[0]}: > {min_val}bp"
+                    annotation_text=f"{message.split(' - ')[0]}: > {min_val}"
                 )
     else:
         # 기존 방식 (정상 범위만 표시)
@@ -336,10 +409,12 @@ def create_spread_chart(df, spread_name, spread_info, latest_value):
         )
     
     # 레이아웃
+    y_axis_title = "Index Value" if spread_info.get('is_single_series', False) else "Basis Points (bp)"
+    
     fig.update_layout(
         title=f"{spread_name} ({spread_info['normal_range']})",
         xaxis_title="날짜",
-        yaxis_title="Basis Points (bp)",
+        yaxis_title=y_axis_title,
         hovermode='x unified',
         height=400,
         showlegend=True
@@ -384,9 +459,9 @@ if api_key:
         st.info(f"📅 **조회 기간**: {start_date} ~ {end_date_input.strftime('%Y-%m-%d')}")
     
     # 현재 상태 요약
-    st.subheader("📍 현재 상태 (2025-11)")
+    st.subheader("📍 현재 상태")
     
-    summary_cols = st.columns(5)
+    summary_cols = st.columns(6)
     
     for idx, (key, spread_info) in enumerate(SPREADS.items()):
         with summary_cols[idx]:
@@ -406,9 +481,12 @@ if api_key:
                         in_range = spread_info['threshold_min'] <= latest_value <= spread_info['threshold_max']
                         status_msg = "✅ 정상" if in_range else "⚠️ 주의"
                     
+                    # STLFSI4의 경우 단위 표시 변경
+                    value_unit = "" if spread_info.get('is_single_series', False) else "bp"
+                    
                     st.metric(
                         label=spread_info['name'],
-                        value=f"{latest_value:.1f}bp",
+                        value=f"{latest_value:.2f}{value_unit}",
                         delta=status_msg.split(' - ')[0] if ' - ' in status_msg else status_msg
                     )
                     st.caption(spread_info['description'])
@@ -548,14 +626,21 @@ if api_key:
                     with col1:
                         # 최신 값 및 통계
                         stat_cols = st.columns(4)
+                        value_unit = "" if spread_info.get('is_single_series', False) else "bp"
+                        
                         with stat_cols[0]:
-                            st.metric("현재 값", f"{latest_value:.2f}bp")
+                            st.metric("현재 값", f"{latest_value:.2f}{value_unit}")
                         with stat_cols[1]:
-                            st.metric("평균", f"{df_spread['spread'].mean():.2f}bp")
+                            st.metric("평균", f"{df_spread['spread'].mean():.2f}{value_unit}")
                         with stat_cols[2]:
-                            st.metric("최대", f"{df_spread['spread'].max():.2f}bp")
+                            st.metric("최대", f"{df_spread['spread'].max():.2f}{value_unit}")
                         with stat_cols[3]:
-                            st.metric("최소", f"{df_spread['spread'].min():.2f}bp")
+                            st.metric("최소", f"{df_spread['spread'].min():.2f}{value_unit}")
+                        
+                        # STLFSI4의 경우 4주 이동평균도 표시
+                        if spread_info.get('is_single_series', False) and 'ma_4w' in df_spread.columns:
+                            latest_ma = df_spread['ma_4w'].iloc[-1]
+                            st.caption(f"📊 4주 이동평균: {latest_ma:.2f}")
                     
                     with col2:
                         # 현재 신호 상태
@@ -581,8 +666,8 @@ if api_key:
                         use_container_width=True
                     )
                     
-                    # 구성 요소 차트
-                    if df_components is not None:
+                    # 구성 요소 차트 (단일 시리즈가 아닌 경우에만)
+                    if not spread_info.get('is_single_series', False) and df_components is not None:
                         with st.expander("구성 요소 보기"):
                             st.plotly_chart(
                                 create_components_chart(df_components, spread_info['series']),
